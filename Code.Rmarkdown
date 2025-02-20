@@ -1,0 +1,418 @@
+---
+title: "Pedigree Analysis using Paramlink"
+author: "Boooo Defne"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+# Clouston syndrome
+## Setup and Data Loading
+
+First, we'll load the required libraries and set up our working
+directory.
+
+```{r setup}
+library(paramlink)
+library(writexl)
+library(ggplot2)
+library(dplyr)
+library(ggrepel)
+
+# Set working directory
+setwd("~/Desktop/TP_DATA_PROG/I.a.Paramlink")
+
+# Read family data
+fam <- read.table("fam.txt")
+
+# Display first few rows and columns
+fam[1:5,1:10]
+```
+
+## Data Transformation and Initial Analysis
+
+We'll transform the family data into a linkage format using the
+`linkdat` function.
+
+```{r transformation}
+transformation <- linkdat(fam)
+```
+
+### Analysis Questions
+
+**Q1: Genotype Analysis** - Question: What is the genotype of the 1st
+marker for individual ID 5?
+
+**Q2: Family Structure Analysis** - Results from pedigree analysis: - 22
+affected individuals - 25 non-affected individuals (47 total) - 13
+markers analyzed - 10 nuclear families
+
+**Q3: Linkdat Function Transformation**
+
+```{r summary}
+summary(transformation)
+```
+
+**Q4: Pedigree Structure Analysis** Key findings: - 11 founder
+individuals - 13 individuals with unknown genotype - 4 markers with 7
+alleles
+
+## Pedigree Visualization
+
+```{r pedigree_plot}
+plot(transformation, marker=1)
+```
+
+**Q5: Specific Genotype Analysis** Notable genotypes: - Individual 15:
+9/2 - Individual 16: 1/1 - Individual 17: ./.
+
+## Linkage Analysis
+
+Here we perform linkage analysis using a genetic model and calculate LOD
+scores. We also obtain the maximum Lod Score; through the summary
+function.
+
+```{r linkage_analysis}
+# Create genetic model
+genetic_model <- setModel(transformation, 
+                         model=1, 
+                         penetrances=c(0.00001,1, 1), 
+                         dfreq=0.00001)
+
+# Calculate LOD scores for different theta values
+lod_score <- lod(genetic_model, 
+                 theta=c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5))
+
+# Display LOD score summary
+summary(lod_score)
+```
+
+We observe that the maximum LodScore from the dataframe is observed in
+Marker 4; 8.171219. All Markers apart from M11, M12 and M13
+
+## Export Results or not?
+
+Finally, we'll export the LOD scores to an Excel file.
+
+```{r export_results}
+# Convert LOD scores to dataframe
+lod_dataframe <- data.frame(head(lod_score, 9))
+
+# Export to Excel
+write_xlsx(lod_dataframe, "Lod_sheet.xlsx")
+```
+
+After creating a graph on excel, the intersection between the Z-max-1
+line is located at theta 0.8. Since zmax is the theta 0, no confidence
+interval exclusion zone on the left, only positive. only one boundary
+for interval.
+
+## Getting confidence interval the SHAMidi way
+
+```{r Confidence Interval}
+copy_lod <- lod_dataframe
+copy_lod[,2] <- 6.67
+head(copy_lod)
+```
+
+```{r MakingGraph}
+# Load Required Libraries
+library(dplyr)
+library(ggplot2)
+
+# Create sample dataframe
+final_cop <- data.frame(
+  theta = c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5),
+  lodscore = c(7.673800035, 7.035453345, 6.365580811, 5.661046708, 
+               4.918254344, 4.133296787, 3.302875254, 1.528958522, 0),    
+  z_max_1 = rep(6.673800035, 9)
+)
+
+# Function to find intersection using linear interpolation
+find_intersection <- function(data) {
+  # Calculate differences
+  data <- data %>%
+    mutate(difference = lodscore - z_max_1)
+  
+  # Find where sign changes occur
+  sign_changes <- which(diff(sign(data$difference)) != 0)
+  
+  # If no intersections found, return NULL
+  if (length(sign_changes) == 0) return(NULL)
+  
+  # For each sign change, interpolate to find exact intersection
+  intersections <- lapply(sign_changes, function(i) {
+    # Get points before and after intersection
+    x1 <- data$theta[i]
+    x2 <- data$theta[i + 1]
+    y1 <- data$lodscore[i]
+    y2 <- data$lodscore[i + 1]
+    z1 <- data$z_max_1[i]
+    z2 <- data$z_max_1[i + 1]
+    
+    # Linear interpolation for intersection point
+    # Solve for: y = mx + b where lines intersect
+    m1 <- (y2 - y1) / (x2 - x1)
+    m2 <- (z2 - z1) / (x2 - x1)
+    b1 <- y1 - m1 * x1
+    b2 <- z1 - m2 * x1
+    
+    # Calculate intersection
+    x_int <- (b2 - b1) / (m1 - m2)
+    y_int <- m1 * x_int + b1
+    
+    data.frame(theta = x_int, y = y_int)
+  })
+  
+  do.call(rbind, intersections)
+}
+
+# Find intersections
+intersections <- find_intersection(final_cop)
+
+# Visualize the results
+ggplot(final_cop, aes(x = theta)) +
+  geom_line(aes(y = lodscore, color = "LOD Scores")) +
+  geom_line(aes(y = z_max_1, color = "ZMax-1")) +
+  geom_point(data = intersections, aes(x = theta, y = y), 
+             color = "red", size = 3) +
+  labs(title = "Intersection Analysis",
+       x = "Theta",
+       y = "Lod Score",
+       color = "Line Type") +
+  theme_minimal()
+
+# Print results
+print("Intersection points:")
+print(intersections)
+
+
+```
+
+The intersection of the Z-max-1 series and LOD score series, is the
+confidence interval; which is returned as 0.07699419. Due to the
+perceivable linearity of our lodscore curve and given that there are no
+lodscores below the -2 threshold, we can see say that there is no
+"impossible" area in which the alleles and markers cannot coexist (this
+area we would obtain from the -2 threshold on the curve). The CI can
+only be above 0, cannot be below; mention.
+
+## Obtain max lodscores; then for other markers.
+
+```{r AMOGAS}
+lod(genetic_model, marker=c(5,7,8,12), theta='max')
+```
+
+In the above results we observe that marker 5, 6, 8 obtain their Z-max
+at theta=0, whilst marker 12 at a theta equal to \~0.05. Particularly,
+we could see these markers as having a descending order of proximity to
+the allele, with marker 12 being the farthest away compared to the rest.
+
+If we use the "max" function on the excel, the max lod-scores for the
+other markers are, from one to thirteen respectively: 7.673800,
+7.247411, 4.762693, 8.171219, 6.0050443, 4.969872, 5.7141323, 5.2550744,
+4.2537353, 3.5643218, 3.5708778 (θ=0.1), 4.285454 (θ=0.1), 2.3859584
+(θ=0.15).
+
+Markers 1 to 10 are in remarkable proximity to the disease gene, given
+they all obtain their Zmax at theta=0.
+
+If we were to go into further detail, we could also do the following:
+
+```{r}
+library(qtl)
+my_cross <- read.cross(format = "csv",     
+                      file = "/Users/chrismitsacopoulos/Desktop/TP_DATA_PROG/I.a.Paramlink/fam.txt",
+                      genotypes = c("1", "2", "0"),
+                      sep = "\t",           # Specify tab separation
+                      estimate.map = TRUE)  
+# Check the structure
+summary(my_cross)
+
+# Make sure the model is properly attached
+my_cross <- calc.genoprob(my_cross)
+my_cross$genetic.model <- genetic_model
+
+# Then run the scan
+scan_results <- scanone(my_cross, 
+                       method = "em",
+                       model = genetic_model)
+
+perms <- scanone(your_cross_object, 
+                 method = "em",
+                 model = genetic_model,
+                 n.perm = 1000)
+
+# Get significance thresholds
+thresholds <- summary(perms, alpha = c(0.05, 0.01))
+
+# Get maximum LOD score and its position
+max_lod <- max(scan_results[,"lod"])
+peak_position <- scan_results[which.max(scan_results[,"lod"]), ]
+print(scan_results)
+```
+
+## Obtain marker allele frequencies
+
+```{r allele frequencies}
+mark5_freq <- modifyMarker(genetic_model, marker = 5, afreq = c(0.1, 0.1, 0.1, 0.7)) 
+summary(mark5_freq)
+lod_marker5 <- data.frame(lod(mark5_freq, marker=5, theta=c(0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5)))
+print(lod_marker5)
+```
+
+Following modification of the frequencies, we observe higher lodscores
+which are still contained within a descending order; indicative of a
+nearer localisation of marker 5 to the disease gene.
+
+Conclusions for theta=0 have been covered above; markers 1 to 10 obtain
+their Zmax at that distance, indicating the markers should be in very
+close proximity to the disease gene.
+
+## Familial analysis-TDT
+
+After running FBAT, logging the data and loading it, we obtain the
+following:
+
+```{bash}
+read in: 6 markers from 651 pedigrees (652 nuclear families,2011 persons)
+```
+
+Considering we have 651 pedigrees but 652 nuclear families, the only
+possible average person per family count can be 3, or 3.08 to be exact.
+
+The results obtained from FBAT on the terminal:
+![Miaou](/Users/chrismitsacopoulos/Desktop/Paris-Saclay_Notes/Term_2/NGS_strategies/Screenshot%202025-01-16%20at%2009.27.01.png)
+An informative family is one from which the parents, we can determine
+which alleles were transmitted to the children, and for which we can
+infer WHO and HOW people became susceptible-and therefore sick.
+
+SNP1 does not have informative families, considering its not even there.
+
+## Fbat analysis on ENSEMBL
+
+Find the pdf attached to the main folder of notes; ![Miaou](SNP6.png)
+
+The researched SNP (rs76179836) as it appears given the LD values, seems
+to be the causal/threshold variant, given it survives proximity to the
+gene during recombination-passing down the family.
+
+# Reumatoid Arthritis
+
+## Compiling the exes
+
+Run commands as shown on the pdf;
+
+Number of families analyzed: 88
+
+Number of generations per family: 2 (100.0%); all families have two generations accounted for in the data.
+
+Average number of individuals per family: 6.50; Distr. 5 (20.5%), 6 (19.3%) and 4 (18.2%)
+
+Total number of individuals: 572
+
+Total number of affected individuals: 453; 453 (Diagnostics;Sick), 59 (Founders)
+
+Number of genetic markers studied: 1089 (52.7%) proportion present in 328040
+
+The highest and lowest heterozygosity rates for the markers studied, respectively: 
+```{bash}
+MARKER   RANK    PROP   N_GENO |        MARKER   RANK    PROP   N_GENO
+a055zg1/(AC)n      1   74.1%      424 | a102wf9/(AC)n   1089    1.7%       10
+```
+ 
+## PLINKING; progrress log
+
+Individuals with a call rate higher than 95%.
+```{bash}
+50971 variants loaded from .bim file.
+89 people (89 males, 0 females) loaded from .fam.
+89 phenotype values loaded from .fam.
+0 people removed due to missing genotype data (--mind).
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 89 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate is 0.994134.
+50971 variants and 89 people pass filters and QC.
+Among remaining phenotypes, 44 are cases and 45 are controls.
+```
+SNPs with a call rate higher than 95%.
+```{bash}
+Calculating allele frequencies... done.
+Total genotyping rate is 0.994134.
+1509 variants removed due to missing genotype data (--geno).
+49462 variants and 89 people pass filters and QC.
+Among remaining phenotypes, 44 are cases and 45 are controls.
+```
+Deletion of SNPs with MAF (Minor Allele Frequency) < 5% 
+```{bash}
+35293 variants and 89 people pass filters and QC.
+Among remaining phenotypes, 44 are cases and 45 are controls.
+```
+Deletion of SNPs that do not verify the Hardy-Weinberg model (by default, plink performs the test in the controls subsample)
+```{bash}
+Total genotyping rate is 0.996644.
+--hardy: Writing Hardy-Weinberg report (founders only) to IndMkMAFHWE.hwe ...
+done.
+--hwe: 945 variants removed due to Hardy-Weinberg exact test.
+34348 variants and 89 people pass filters and QC.
+Among remaining phenotypes, 44 are cases and 45 are controls.
+```
+Deletion of SNPs with MAF (Minor Allele Frequency) < 5% 
+```{bash}
+35293 variants and 89 people pass filters and QC.
+Among remaining phenotypes, 44 are cases and 45 are controls.
+```
+
+## Allelic and Genotypic association tests
+
+Allelic association before bonferonni correction: 2290
+Following Bonferonni correction: NONE
+Genotypic association before bonferonni correction: 2033
+Following Bonferonni correction: NONE; False positives avoided, true positives lost.
+
+some variats have very low p-value before correction, identify them using an awk "minimum" command to observe any interesting variants that are "lost" by bonferonni.
+
+
+Results should differ as preliminary analysis was based on:
+Random number seed: 1737037885
+
+Perform PCA test for last question for homogeneity
+
+awk 'NR > 1 && $5 <= 0.05 {count++} END {print count}' /Users/chrismitsacopoulos/Desktop/TP_DATA_PROG/II.a.Plink/res_geno_adjusted.assoc.logistic.adjusted
+
+./plink.exe -bfile IndMkMAFHWE --logistic --ci .095 --adjust --out res_geno_adjusted
+./plink.exe -bfile IndMkMAFHWE --assoc --ci .095 --adjust --out res_allelic_adjusted
+## PCA
+
+``` {r}
+library(ggplot2)
+setwd("~/Desktop/TP_DATA_PROG/II.a.Plink")
+
+# 2. Read eigenvec file
+df <- read.table("plink.eigenvec", header = FALSE, stringsAsFactors = FALSE)
+
+# 3. Assign column names
+num_pcs <- ncol(df) - 2
+colnames(df) <- c("FID", "IID", paste0("PC", 1:num_pcs))
+
+# 4. Define population from FID
+df$Population <- ifelse(grepl("^HCB", df$FID), "HCB",
+                        ifelse(grepl("^JPT", df$FID), "JPT", NA))
+
+# 5. Create a scatter plot for PC1 vs PC2
+pac_scatter <- ggplot(df, aes(x = PC1, y = PC2, color = Population)) +
+  geom_point(size = 2, alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "PCA: HCB vs. JPT",
+    x = "PC1",
+    y = "PC2"
+  ) +
+  theme(plot.title = element_text(hjust = 0.5))
+ggsave("pca_scatter_plot.png", pca_scatter, width = 8, height = 6, dpi = 300)
+
+```
+All of the above code is courtesy of: https://speciationgenomics.github.io/pca/
+
